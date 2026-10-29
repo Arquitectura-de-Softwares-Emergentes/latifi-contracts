@@ -1,0 +1,31 @@
+name: commit-lint
+
+# pull_request only. Never pull_request_target: this job checks out untrusted PR code.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  commit-lint:
+    name: commit-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      # PR text is attacker-controlled. It reaches the script only through env.
+      - name: Lint commits, PR title and branch name
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: bash .github/scripts/commit-lint.sh
