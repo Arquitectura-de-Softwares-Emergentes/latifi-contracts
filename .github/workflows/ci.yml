@@ -39,5 +39,8 @@ jobs:
       - name: Build
         run: forge build --sizes
 
+      - name: ABI drift check
+        run: bash scripts/check-abi.sh
+
       - name: Test
         run: forge test -vvv
