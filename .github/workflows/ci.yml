@@ -27,6 +27,12 @@ jobs:
         with:
           version: v1.8.7
 
+      - name: Testnet-only and secret guard
+        run: bash scripts/check-testnet-only.sh
+
+      - name: Guard self-test
+        run: bash scripts/check-testnet-only.test.sh
+
       - name: Check formatting
         run: forge fmt --check
 
