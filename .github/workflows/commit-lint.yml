@@ -20,6 +20,9 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
+      - name: Self-test the lint rules
+        run: bash .github/scripts/commit-lint.test.sh
+
       # PR text is attacker-controlled. It reaches the script only through env.
       - name: Lint commits, PR title and branch name
         env:
