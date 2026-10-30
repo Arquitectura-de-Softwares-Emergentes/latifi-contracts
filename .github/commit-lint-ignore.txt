@@ -1,0 +1,1 @@
+# SHAs listed here (first token of a non-comment line, at least 7 characters) skip commit-lint.
