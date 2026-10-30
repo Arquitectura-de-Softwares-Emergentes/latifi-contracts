@@ -33,6 +33,9 @@ jobs:
       - name: Guard self-test
         run: bash scripts/check-testnet-only.test.sh
 
+      - name: Wallet scripts self-test
+        run: bash scripts/wallets/wallets.test.sh
+
       - name: Check formatting
         run: forge fmt --check
 
