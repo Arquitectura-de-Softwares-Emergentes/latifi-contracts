@@ -20,7 +20,7 @@ esac
 case "$*" in *rpc.example.invalid*) echo "stub: rpc url leaked into argv" >&2; exit 9 ;; esac
 case "$1" in
   chain-id) [ -z "${STUB_RPC_DOWN:-}" ] || { echo "connection refused for $ETH_RPC_URL" >&2; exit 1; }
-            echo "${STUB_CHAIN_ID:-80002}" ;;
+            echo "${STUB_NETWORK:-80002}" ;;
   balance)  cat "$STUB_BALANCES/$2" ;;
   send)     echo '{"transactionHash":"0xabc123","status":"0x1"}' ;;
   wallet)   dir="$3"; name="$4"
@@ -76,10 +76,10 @@ set_balances() { # deployer, others (wei)
 }
 set_balances 1000000000000000000 100000000000000000
 
-STUB_CHAIN_ID=1 run bash "$HERE/check-balances.sh"
+STUB_NETWORK=1 run bash "$HERE/check-balances.sh"
 check "check-balances refuses chain 1" 3 "$RC"
 ok "wrong-chain message hides the key" "$(! printf '%s' "$OUT" | grep -q CANARYKEY; echo $?)"
-STUB_CHAIN_ID=137 run bash "$HERE/top-up.sh" --to all --amount 0.1
+STUB_NETWORK=137 run bash "$HERE/top-up.sh" --to all --amount 0.1
 check "top-up refuses chain 137" 3 "$RC"
 STUB_RPC_DOWN=1 run bash "$HERE/check-balances.sh"
 check "check-balances exits 3 when RPC is down" 3 "$RC"
