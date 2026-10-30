@@ -56,7 +56,7 @@ run() { OUT="$("$@" 2>&1)"; RC=$?; }
 run bash "$HERE/new-pool.sh"
 check "new-pool exits 0" 0 "$RC"
 ok "six keystores" "$([ "$(ls "$LATIFI_HOME/keystores" | wc -l | tr -d ' ')" = 6 ]; echo $?)"
-perm() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"; }
+perm() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"; }
 ok "home mode 700" "$([ "$(perm "$LATIFI_HOME")" = 700 ]; echo $?)"
 ok "password mode 600" "$([ "$(perm "$LATIFI_HOME/keystore-password")" = 600 ]; echo $?)"
 ok "manifest shape" "$(jq -e '.chainId == 80002 and (.wallets | length) == 6 and ([.wallets[].role] | sort) == ["borrower-1","borrower-2","borrower-3","deployer","lender-1","lender-2"] and ([.wallets[].address | test("^0x[0-9a-fA-F]{40}$")] | all)' "$DEMO_WALLETS_MANIFEST" >/dev/null; echo $?)"
