@@ -2,7 +2,7 @@
 
 This file describes the four events that every other LatiFi component reads from the chain. The source of truth is `src/interfaces/ILoanEvents.sol`. The same events are published as JSON in `abi/loan-events.v0.json`, and `scripts/check-abi.sh` fails CI when the two disagree.
 
-Status: v0 draft. The API indexer (Phase 4) and the Android app (Phase 5) can build fixtures against it now. Phase 3 freezes the interface after reviewing the real contract, and until then any change goes into the changelog at the end of this file.
+Status: v0 is frozen by Phase 3. The event interface matches the real `LoanBook` contract, and `abi/loan-events.v0.json` does not change. Changing the ABI needs a new version file and a row in the changelog at the end of this file. The rules of the contract (formula, schedule, default) are in `docs/LOANBOOK.md`.
 
 ## Rules that shape the events
 
@@ -36,7 +36,7 @@ Emitted when the borrower's request is stored on-chain. The request is open from
 
 ## LoanFunded
 
-Emitted when a lender funds an open request. The principal moves to the borrower and the terms are locked in the same transaction.
+Emitted when a lender funds an open request. The principal moves to the borrower and the terms are locked in the same transaction. The total due is computed and stored in this same transaction.
 
 | Field | Solidity type | Indexed | Unit | Meaning |
 |-------|---------------|---------|------|---------|
@@ -55,11 +55,11 @@ Emitted on every payment toward a loan, including partial ones and the one that 
 |-------|---------------|---------|------|---------|
 | loanId | uint256 | yes | none | The loan being repaid. |
 | amountPaid | uint256 | no | stablecoin base units | Amount moved by this payment only, not a running total. |
-| onTime | bool | no | none | True when the payment arrived on or before the due date it applies to. |
+| onTime | bool | no | none | True when the payment arrived on or before the due time of the installment being paid. |
 
 ## LoanDefaulted
 
-Emitted once, when an overdue loan is marked as defaulted.
+Emitted once, when a loan is marked as defaulted because an installment is more than 7 days overdue.
 
 | Field | Solidity type | Indexed | Unit | Meaning |
 |-------|---------------|---------|------|---------|
@@ -74,7 +74,7 @@ Emitted once, when an overdue loan is marked as defaulted.
 | LoanRequested | The request is stored. No funds move. |
 | LoanFunded | A lender's transfer to the borrower succeeds and the loan becomes active. |
 | LoanRepaid | A payment transfer to the lender succeeds. One event per payment. |
-| LoanDefaulted | Someone marks a loan whose due date has passed with an unpaid balance. |
+| LoanDefaulted | Someone marks an active loan whose current installment is more than 7 days overdue. At exactly 7 days the call still reverts. |
 
 ## Installment schedule
 
@@ -82,7 +82,21 @@ The contract stores no list of dates. Consumers derive the schedule from three v
 
 Installment k, for k from 1 to N, falls due at `fundedAt + k * termDays * 86400 / N` seconds, using integer division. Installment N therefore falls due exactly at `dueDate`. With N = 1 the only installment is the final one.
 
-Each installment is `total / N`. Phase 3 decides how the rounding remainder is assigned, with the last installment as the working assumption, and records it here when the contract is reviewed.
+Each of the first N minus 1 installments is `floor(total / N)`. The last installment absorbs the rounding remainder: it is `total - (N - 1) * floor(total / N)`, which is larger than the others by at most N minus 1 base units. When `total` is smaller than N the first installments are 0 and the last one carries everything. The due times use integer division by N.
+
+A payment never spans two installments. A loan with an unpaid installment keeps that installment as the current one until it is paid.
+
+## Status values
+
+The loan status is not part of an event. Consumers read it from `getLoan` or derive it from the events. The numeric values are frozen.
+
+| Value | Name | How the events show it |
+|-------|------|------------------------|
+| 0 | None | No event exists for this id. |
+| 1 | Open | LoanRequested seen, no LoanFunded yet. |
+| 2 | Active | LoanFunded seen, not yet settled or defaulted. |
+| 3 | Repaid | The LoanRepaid payments add up to the total due. |
+| 4 | Defaulted | LoanDefaulted seen. |
 
 ## Consumers
 
@@ -98,3 +112,4 @@ Each installment is `total / N`. Phase 3 decides how the rounding remainder is a
 |---------|--------|
 | v0 | Initial draft: four events, installments field on LoanRequested. |
 | v0.1 | Interest meaning clarified as annual simple interest in basis points, ranges documented. Event ABI unchanged. |
+| v0.2 | Remainder rule, default rule and status values documented. Event ABI unchanged. |
