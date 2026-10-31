@@ -45,6 +45,12 @@ jobs:
       - name: Repo lint rules
         run: bash scripts/check-lint.sh
 
+      - name: Cycle script self-test
+        run: bash scripts/cycle.test.sh
+
+      - name: Deployment record self-test
+        run: bash scripts/deployment.test.sh
+
       - name: Check formatting
         run: forge fmt --check
 
@@ -56,6 +62,9 @@ jobs:
 
       - name: ABI drift check
         run: bash scripts/check-abi.sh
+
+      - name: Deployment record guard
+        run: bash scripts/check-deployment.sh
 
       - name: Deploy script dry run
         run: forge script script/Deploy.s.sol:Deploy --sender 0x5577fc66c64e4749eed2e09E6Cd5A2b0e7F970D6
