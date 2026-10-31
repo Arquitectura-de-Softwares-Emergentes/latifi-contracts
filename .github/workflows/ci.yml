@@ -36,6 +36,9 @@ jobs:
       - name: Wallet scripts self-test
         run: bash scripts/wallets/wallets.test.sh
 
+      - name: Dependency pin guard
+        run: bash scripts/check-deps-pinned.sh
+
       - name: Check formatting
         run: forge fmt --check
 
@@ -44,6 +47,9 @@ jobs:
 
       - name: ABI drift check
         run: bash scripts/check-abi.sh
+
+      - name: Deploy script dry run
+        run: forge script script/Deploy.s.sol:Deploy --sender 0x5577fc66c64e4749eed2e09E6Cd5A2b0e7F970D6
 
       - name: Test
         run: forge test -vvv

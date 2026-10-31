@@ -19,7 +19,7 @@ Status: v0 draft. The API indexer (Phase 4) and the Android app (Phase 5) can bu
 | Timestamp | Unix seconds, as `uint64`. |
 | Days | Whole days, as `uint32`. |
 
-`interestRateBps` is flat interest over the whole term, not per month and not annualized. The total owed is `amount + amount * interestRateBps / 10000`.
+`interestRateBps` is an annual rate with simple interest, in basis points of the principal. It is valid from 1 to 5000, which is up to 50 percent a year. It is not compounded and it is not a rate for the whole term. The total owed is the principal plus `floor(principal * interestRateBps * termDays / 3650000)`. The contract computes it once when a lender funds the request and it never changes afterwards. The term is 1 to 365 days.
 
 ## LoanRequested
 
@@ -30,8 +30,8 @@ Emitted when the borrower's request is stored on-chain. The request is open from
 | loanId | uint256 | yes | none | Identifier assigned to the request. |
 | borrower | address | yes | none | Wallet that asked for the loan. |
 | amount | uint256 | no | stablecoin base units | Requested principal. |
-| interestRateBps | uint16 | no | bps | Flat interest over the whole term. |
-| termDays | uint32 | no | days | Length of the loan, counted from the funding time. |
+| interestRateBps | uint16 | no | bps | Annual simple interest, 1 to 5000. |
+| termDays | uint32 | no | days | Length of the loan, 1 to 365 days, counted from the funding time. |
 | installments | uint8 | no | count | Number of equal installments, 1 to 6. |
 
 ## LoanFunded
@@ -97,3 +97,4 @@ Each installment is `total / N`. Phase 3 decides how the rounding remainder is a
 | Version | Change |
 |---------|--------|
 | v0 | Initial draft: four events, installments field on LoanRequested. |
+| v0.1 | Interest meaning clarified as annual simple interest in basis points, ranges documented. Event ABI unchanged. |

@@ -6,3 +6,4 @@ broadcast/
 keystores/
 *.keystore
 .DS_Store
+lcov.info
