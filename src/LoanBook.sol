@@ -67,6 +67,10 @@ contract LoanBook is ILoanEvents, ReentrancyGuardTransient {
     /// @notice Highest accepted principal. Half of the uint128 range, so that the principal plus
     /// the largest possible interest still fits in a uint128.
     uint256 public constant MAX_PRINCIPAL = type(uint128).max / 2;
+    /// @notice How long an installment can stay unpaid before anyone may mark the loan defaulted.
+    uint256 public constant GRACE_PERIOD = 7 days;
+
+    uint256 private constant DAY = 1 days;
 
     /// @dev 365 days times 10000 basis points. One floor division by this value equals the chained
     /// divisions by 365 and by 10000.
@@ -98,6 +102,18 @@ contract LoanBook is ILoanEvents, ReentrancyGuardTransient {
     error LoanNotOpen(uint256 loanId);
     /// @notice A borrower cannot fund their own request.
     error SelfFunding();
+    /// @notice The loan is not active, so it cannot be repaid or marked as defaulted.
+    error LoanNotActive(uint256 loanId);
+    /// @notice The loan has not been funded, so it has no installment schedule yet.
+    error LoanNotFunded(uint256 loanId);
+    /// @notice The installment index is zero or above the number of installments of the loan.
+    error InstallmentOutOfRange(uint256 index, uint256 installments);
+    /// @notice Only the borrower of the loan can repay it.
+    error NotBorrower(address caller, address borrower);
+    /// @notice The payment is above what is left on the current installment.
+    error Overpayment(uint256 amount, uint256 maxAllowed);
+    /// @notice The current installment is not yet more than the grace period overdue.
+    error NotOverdue(uint256 loanId, uint256 overdueAfter);
     /// @notice The receiver got a different amount than the one sent, for example a fee on transfer.
     error UnexpectedTransferAmount(uint256 expected, uint256 received);
 
@@ -175,6 +191,91 @@ contract LoanBook is ILoanEvents, ReentrancyGuardTransient {
         );
     }
 
+    /// @notice Pays part or all of the current installment. The tokens move from the caller to the
+    /// lender in this transaction.
+    /// @dev Only the borrower can call it, and the tokens come from the caller, so nobody else can
+    /// spend the borrower's allowance. A payment never spans two installments. State is written
+    /// before the token call.
+    /// @param loanId Identifier of the active loan.
+    /// @param amount Token base units to pay, from 1 to what is left on the current installment.
+    function repay(uint256 loanId, uint256 amount) external nonReentrant {
+        Loan storage loan = _existing(loanId);
+        if (loan.status != Status.Active) revert LoanNotActive(loanId);
+        address loanBorrower = loan.borrower;
+        if (msg.sender != loanBorrower) revert NotBorrower(msg.sender, loanBorrower);
+        if (amount == 0) revert ZeroAmount();
+
+        (, uint256 dueAt, uint256 remaining) = _current(loan);
+        if (amount > remaining) revert Overpayment(amount, remaining);
+
+        // validators can skew the timestamp by seconds, which cannot change a day scale deadline
+        // forge-lint: disable-next-line(block-timestamp)
+        bool onTime = block.timestamp <= dueAt;
+        // casting to 'uint128' is safe because amount <= remaining <= totalDue, and totalDue is at
+        // most 0.75 of the uint128 maximum
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint128 newTotalPaid = loan.totalPaid + uint128(amount);
+        loan.totalPaid = newTotalPaid;
+        if (newTotalPaid == loan.totalDue) loan.status = Status.Repaid;
+        if (onTime) {
+            _reputation[loanBorrower].onTime++;
+        } else {
+            _reputation[loanBorrower].late++;
+        }
+
+        _pull(msg.sender, loan.lender, amount);
+
+        emit LoanRepaid(loanId, amount, onTime);
+    }
+
+    /// @notice Marks a loan as defaulted when its current installment is more than seven days
+    /// overdue. Anyone can call it. No tokens move.
+    /// @param loanId Identifier of the active loan.
+    function markDefaulted(uint256 loanId) external nonReentrant {
+        Loan storage loan = _existing(loanId);
+        if (loan.status != Status.Active) revert LoanNotActive(loanId);
+
+        (, uint256 dueAt,) = _current(loan);
+        uint256 overdueAfter = dueAt + GRACE_PERIOD;
+        // validators can skew the timestamp by seconds, which cannot change a seven day grace
+        // forge-lint: disable-next-line(block-timestamp)
+        if (block.timestamp <= overdueAfter) revert NotOverdue(loanId, overdueAfter);
+
+        loan.status = Status.Defaulted;
+        address loanBorrower = loan.borrower;
+        _reputation[loanBorrower].defaulted++;
+
+        emit LoanDefaulted(loanId, loanBorrower, loan.totalDue - loan.totalPaid);
+    }
+
+    /// @notice Describes the installment that the next payment applies to.
+    /// @param loanId Identifier of the active loan.
+    /// @return index Position of the installment, from 1 to the number of installments.
+    /// @return dueAt Unix seconds when the installment falls due.
+    /// @return amountDue Token base units still unpaid on this installment.
+    function nextInstallment(uint256 loanId)
+        external
+        view
+        returns (uint256 index, uint256 dueAt, uint256 amountDue)
+    {
+        Loan storage loan = _existing(loanId);
+        if (loan.status != Status.Active) revert LoanNotActive(loanId);
+        return _current(loan);
+    }
+
+    /// @notice Due time of one installment of a funded loan.
+    /// @param loanId Identifier of the funded loan.
+    /// @param index Position of the installment, from 1 to the number of installments.
+    /// @return Unix seconds of fundedAt plus index * termDays days / installments.
+    function installmentDueAt(uint256 loanId, uint256 index) external view returns (uint256) {
+        Loan storage loan = _existing(loanId);
+        if (loan.fundedAt == 0) revert LoanNotFunded(loanId);
+        if (index == 0 || index > loan.installments) {
+            revert InstallmentOutOfRange(index, loan.installments);
+        }
+        return _dueAt(loan, index);
+    }
+
     /// @notice Total owed for a loan: the principal plus simple annual interest, rounded down.
     /// @param principal Loan amount in token base units.
     /// @param rateBps Annual rate in basis points.
@@ -213,6 +314,33 @@ contract LoanBook is ILoanEvents, ReentrancyGuardTransient {
     function _existing(uint256 loanId) private view returns (Loan storage loan) {
         loan = _loans[loanId];
         if (loan.status == Status.None) revert LoanNotFound(loanId);
+    }
+
+    /// @dev Due time of installment k, counted from the funding time with integer division.
+    function _dueAt(Loan storage loan, uint256 k) private view returns (uint256) {
+        return loan.fundedAt + (k * loan.termDays * DAY) / loan.installments;
+    }
+
+    /// @dev The installment a payment applies to. Installments 1 to n minus 1 are floor(total / n)
+    /// and the last one takes the rest. With a zero base (a total smaller than the number of
+    /// installments) everything sits on the last installment.
+    function _current(Loan storage loan)
+        private
+        view
+        returns (uint256 index, uint256 dueAt, uint256 remaining)
+    {
+        uint256 n = loan.installments;
+        uint256 total = loan.totalDue;
+        uint256 paid = loan.totalPaid;
+        uint256 base = total / n;
+        index = base == 0 ? n : paid / base + 1;
+        if (index > n) index = n;
+        // installments are defined as floor(total / n) by the documented rule, so the multiplication
+        // after the division is intended
+        // forge-lint: disable-next-line(divide-before-multiply)
+        uint256 target = index == n ? total : index * base;
+        remaining = target - paid;
+        dueAt = _dueAt(loan, index);
     }
 
     /// @dev Moves tokens from one wallet to another and checks that the receiver got the full
