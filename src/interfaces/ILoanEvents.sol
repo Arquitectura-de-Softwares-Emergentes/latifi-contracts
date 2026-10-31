@@ -12,8 +12,9 @@ interface ILoanEvents {
     /// @param loanId Identifier assigned to the request.
     /// @param borrower Address of the requesting wallet.
     /// @param amount Requested principal in stablecoin base units.
-    /// @param interestRateBps Flat interest over the whole term, in basis points of the principal.
-    /// @param termDays Length of the loan in days, counted from the funding time.
+    /// @param interestRateBps Annual simple interest rate in basis points of the principal, from 1 to
+    /// 5000.
+    /// @param termDays Length of the loan in days, from 1 to 365, counted from the funding time.
     /// @param installments Number of equal installments, from 1 to 6.
     event LoanRequested(
         uint256 indexed loanId,
