@@ -39,11 +39,20 @@ jobs:
       - name: Dependency pin guard
         run: bash scripts/check-deps-pinned.sh
 
+      - name: Repo lint self-test
+        run: bash scripts/check-lint.test.sh
+
+      - name: Repo lint rules
+        run: bash scripts/check-lint.sh
+
       - name: Check formatting
         run: forge fmt --check
 
       - name: Build
         run: forge build --sizes
+
+      - name: forge lint
+        run: forge lint --severity high med --deny warnings
 
       - name: ABI drift check
         run: bash scripts/check-abi.sh
@@ -51,5 +60,13 @@ jobs:
       - name: Deploy script dry run
         run: forge script script/Deploy.s.sol:Deploy --sender 0x5577fc66c64e4749eed2e09E6Cd5A2b0e7F970D6
 
-      - name: Test
-        run: forge test -vvv
+      - name: Test (ci profile)
+        run: forge test --profile ci -vvv
+
+      - name: Coverage self-test
+        run: bash scripts/check-coverage.test.sh
+
+      - name: Coverage
+        run: |
+          forge coverage --report summary --report lcov --report-file lcov.info --no-match-coverage "(test|script)/"
+          bash scripts/check-coverage.sh lcov.info 90 src/
