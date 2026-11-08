@@ -5,13 +5,37 @@ script = "script"
 libs = ["lib"]
 solc = "0.8.35"
 auto_detect_solc = false
+# Explicit on purpose: ReentrancyGuardTransient needs the transient storage opcodes (EIP-1153) and a
+# fixed target keeps the Sourcify bytecode match stable.
+evm_version = "cancun"
 optimizer = true
 optimizer_runs = 200
+remappings = [
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+  "forge-std/=lib/forge-std/src/",
+]
 # Tests may read the committed ABI file and nothing else.
 fs_permissions = [{ access = "read", path = "./abi" }]
 
 [fmt]
 line_length = 100
+
+[fuzz]
+runs = 256
+
+[invariant]
+runs = 256
+depth = 32
+fail_on_revert = false
+
+# The ci profile raises the run counts and fixes the fuzz seed so a CI failure reproduces locally.
+[profile.ci.fuzz]
+runs = 1000
+seed = "0x4c617469"
+
+[profile.ci.invariant]
+runs = 512
+depth = 64
 
 # Polygon Amoy testnet, chain id 80002. The URL comes from the environment and is never committed.
 [rpc_endpoints]
