@@ -1,0 +1,45 @@
+name: amoy-smoke
+
+# Readiness check for the demo wallet pool on Polygon Amoy. It uses the repository secret
+# AMOY_RPC_URL, so it must never run on pull requests (T-07-02): the triggers are a push to
+# develop that touches the wallet files, and a manual dispatch. It is not a required check and
+# must never be added to branch protection.
+on:
+  push:
+    branches: [develop]
+    paths:
+      - ".github/workflows/amoy-smoke.yml"
+      - "scripts/wallets/**"
+      - "deployments/demo-wallets.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: amoy-smoke
+  cancel-in-progress: false
+
+jobs:
+  amoy-smoke:
+    name: amoy-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
+        with:
+          version: v1.8.7
+
+      - name: Check the demo wallet balances
+        env:
+          AMOY_RPC_URL: ${{ secrets.AMOY_RPC_URL }}
+        run: |
+          if [ -z "$AMOY_RPC_URL" ]; then
+            echo "AMOY_RPC_URL is not set as a repository secret" >&2
+            exit 1
+          fi
+          echo "::add-mask::$AMOY_RPC_URL"
+          bash scripts/wallets/check-balances.sh
