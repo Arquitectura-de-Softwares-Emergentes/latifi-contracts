@@ -57,7 +57,7 @@ The token limits you work inside: one `mintTo` call mints at most 10,000 tUSD, a
 | --- | --- |
 | T-7d | First check and faucet claims. Faucets are slow, so you start early. If a wallet shows `NO_MINT_HEADROOM`, create a new wallet now |
 | T-72h | Check again and top up whatever is short |
-| T-50h | Stage the late loan, as the demo runbook explains. The staged loan needs wallets that are already funded |
+| T-46h to T-26h | Stage the late loan, as `docs/DEMO-RUNBOOK.md` explains. Paying it at the demo then lands 1 day late (minus 5). The staged loan needs wallets that are already funded |
 | T-24h | The qualifying check. Run it before this moment, not after. Its JSON file is the evidence |
 | T-2h | Final check, only to see that nothing moved. Add `--allow-late` here, because this run is expected to be late |
 | T+0 | The demo |

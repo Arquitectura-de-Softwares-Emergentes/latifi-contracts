@@ -17,3 +17,4 @@ The deployer holds the minter role of the test token and has no power over any l
 ## Runbooks
 
 - [Gate funding runbook](docs/GATE-RUNBOOK.md): check and top up the demo wallets in POL and test stablecoin before each gate.
+- [Demo runbook](docs/DEMO-RUNBOOK.md): the on-time and late runs of the live demo and the three resilience rehearsals, with the scripts in `scripts/demo/`.
