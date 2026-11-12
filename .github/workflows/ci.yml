@@ -36,6 +36,9 @@ jobs:
       - name: Wallet scripts self-test
         run: bash scripts/wallets/wallets.test.sh
 
+      - name: Gate scripts self-test
+        run: bash scripts/gate/gate.test.sh
+
       - name: Dependency pin guard
         run: bash scripts/check-deps-pinned.sh
 
