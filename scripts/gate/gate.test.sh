@@ -429,4 +429,224 @@ holds "cast never saw a key flag" not_logged --private-key
 eq "evidence top level keys" "allowLate,blockNumber,chainId,checkedAt,clockOverridden,gate,gateAt,leadHours,minimums,qualifying,result,token,wallets" "$(jq -r 'keys | join(",")' "$EV")"
 eq "wallet object keys" "address,flags,mintHeadroomBase,mintedToBase,polWei,role,status,tusdBase" "$(jq -r '.wallets[0] | keys | join(",")' "$EV")"
 
+# ---------------------------------------------------------------- 7. top-up: setup
+
+SENDER="$DEPLOYER"
+printf '%s\n' "$SENDER" >"$ST/accounts/latifi-deployer"
+printf '%s\n' "0x1111111111111111111111111111111111111111" >"$ST/accounts/intruder"
+printf '%s\n' "$SENDER" >"$ST/accounts/keystore-file"
+lcase "$SENDER" >"$ST/minters"
+printf '\n' >>"$ST/minters"
+printf '%s' "$PWCANARY" >"$WORK/pw.txt"
+TU() { run bash "$HERE/top-up.sh" --deployments "$DEPLOY" "$@"; }
+reset_top() {
+  funded
+  setw "$LENDER" 100000000000000000 100000000 100000000
+  setw "$BORROWER" 100000000000000000 10000000 10000000
+  setw 0x1111111111111111111111111111111111111111 1000000000000000000 0 0
+  : >"$STUB_LOG"
+}
+reset_top
+
+# ---------------------------------------------------------------- 8. top-up: dry run and the POL send
+
+TU --what pol --to borrower --amount 0.5 --from-account latifi-deployer
+exit_is "a dry run exits 0" 0
+holds "the dry run prints the plan" has "plan: top up borrower with 0.5 POL"
+holds "the dry run names the sender" has "sender      $SENDER"
+holds "the dry run names the recipient" has "recipient   $BORROWER"
+holds "the dry run prints the gas flags" has "--gas-price 35gwei --priority-gas-price 30gwei"
+holds "the dry run prints each check" has "check ok: amount is within the cap of 1 POL per transfer"
+holds "the dry run says nothing was sent" has "dry run: nothing was sent"
+holds "the dry run made no send call" not_logged "cast send"
+holds "the dry run still guards the chain" logged "cast chain-id"
+
+TU --what pol --to borrower --amount 0.5 --from-account latifi-deployer --execute
+exit_is "a POL send exits 0" 0
+holds "the send carries the exact wei and the gas flags" logged "cast send $BORROWER --value 500000000000000000 --account latifi-deployer --gas-price 35gwei --priority-gas-price 30gwei --json"
+holds "the send prints hash and block" has "sent: tx 0xabc123 in block 16"
+holds "the send reads the new balance back" has "new balance of $BORROWER: 0.6 POL"
+eq "exactly one send call" 1 "$(grep -c '^cast send' "$STUB_LOG")"
+holds "the send output hides the key" not_has CANARYKEY
+reset_top
+
+TU --what pol --to lender --amount 1 --from-account latifi-deployer
+exit_is "exactly 1 POL is accepted" 0
+TU --what pol --to lender --amount 1.000000000000000001 --from-account latifi-deployer
+exit_is "1 POL plus one wei is refused" 1
+holds "the refusal gives a reason" has "REFUSED: amount 1.000000000000000001 POL is above the cap"
+TU --what pol --to lender --amount 1.000000000000000001 --from-account latifi-deployer --execute
+exit_is "a refused amount is not sent even with --execute" 1
+holds "a refusal made no send call" not_logged "cast send"
+TU --what pol --to lender --amount 5 --from-account latifi-deployer --execute
+exit_is "5 POL is refused" 1
+
+setw "$DEPLOYER" 500000000000000000 0 0
+TU --what pol --to lender --amount 0.49 --from-account latifi-deployer --execute
+exit_is "a sender short of amount plus the gas reserve is refused" 1
+holds "the insufficient balance reason is shown" has "needs 0.51 POL"
+holds "insufficient balance made no send call" not_logged "cast send"
+TU --what pol --to lender --amount 0.48 --from-account latifi-deployer
+exit_is "a sender with exactly amount plus the gas reserve is accepted" 0
+reset_top
+
+TU --what pol --to 0x2222222222222222222222222222222222222222 --amount 0.1 --from-account latifi-deployer
+exit_is "a raw recipient address works" 0
+TU --what pol --to deployer --amount 0.1 --from-account latifi-deployer
+exit_is "the deployer can be a recipient" 0
+holds "deployer recipient comes from the deployments file" has "recipient   $DEPLOYER (deployer)"
+TU --what pol --to lender --amount 0.1 --from-account latifi-deployer --lender 0x3333333333333333333333333333333333333333
+holds "--lender overrides the lender address" has "recipient   0x3333333333333333333333333333333333333333 (lender)"
+
+# ---------------------------------------------------------------- 9. top-up: the stablecoin mint
+
+reset_top
+TU --what tusd --to lender --amount 500 --from-account latifi-deployer
+exit_is "a tUSD dry run exits 0" 0
+holds "the tUSD plan names the token and mintTo" has "tUSD at $TOKEN_ADDR, 500000000 base units, through mintTo(address,uint256)"
+holds "the tUSD dry run checks the role" has "check ok: sender holds the MINTER_ROLE of the token"
+holds "the tUSD dry run checks the headroom" has "mint headroom"
+holds "the tUSD dry run sent nothing" not_logged "cast send"
+
+TU --what tusd --to lender --amount 500 --from-account latifi-deployer --execute
+exit_is "a successful mint exits 0" 0
+holds "the mint calls mintTo with the right base units" logged "cast send $TOKEN_ADDR mintTo(address,uint256) $LENDER 500000000 --account latifi-deployer --gas-price 35gwei --priority-gas-price 30gwei --json"
+holds "the mint reads the new balance back" has "new balance of $LENDER: 600.0 tUSD"
+reset_top
+
+TU --what tusd --to lender --amount 12.345678 --from-account latifi-deployer --execute
+exit_is "a fractional mint exits 0" 0
+holds "a fractional mint is converted to base units" logged "mintTo(address,uint256) $LENDER 12345678"
+reset_top
+
+TU --what tusd --to lender --amount 500 --from-account intruder --execute
+exit_is "a sender without the minter role is refused" 1
+holds "the role refusal gives a reason" has "does not hold the MINTER_ROLE"
+holds "the role refusal made no send call" not_logged "cast send"
+
+STUB_ROLE=0x1111111111111111111111111111111111111111111111111111111111111111 TU --what tusd --to lender --amount 500 --from-account latifi-deployer
+exit_is "the role hash comes from the token getter, not a constant" 0
+holds "hasRole is asked with the hash the token returned" logged "hasRole(bytes32,address)(bool) 0x1111111111111111111111111111111111111111111111111111111111111111"
+holds "the role is read from the getter" logged "MINTER_ROLE()(bytes32)"
+holds "no role hash is hardcoded in top-up.sh" no_code_match '0x[0-9a-fA-F]{64}' "$HERE/top-up.sh"
+
+TU --what tusd --to lender --amount 10000.000001 --from-account latifi-deployer --execute
+exit_is "a mint above 10000 tokens per call is refused" 1
+holds "the per call cap reason is shown" has "above the cap of 10000 tUSD per mint call"
+TU --what tusd --to 0x1111111111111111111111111111111111111111 --amount 10000 --from-account latifi-deployer
+exit_is "a mint of exactly 10000 tokens is accepted by the call cap" 0
+
+setw "$LENDER" 100000000000000000 100000000 9800000000
+TU --what tusd --to lender --amount 200.000001 --from-account latifi-deployer --execute
+exit_is "a mint above the recipient headroom is refused" 1
+holds "the headroom refusal explains the wallet is spent" has "can no longer be topped up by minting, use a new wallet"
+TU --what tusd --to lender --amount 200 --from-account latifi-deployer
+exit_is "a mint equal to the headroom is accepted" 0
+setw "$LENDER" 100000000000000000 100000000 10000000000
+TU --what tusd --to lender --amount 0.000001 --from-account latifi-deployer --execute
+exit_is "a mint for a recipient at the cap is refused" 1
+holds "no send happened at the cap" not_logged "cast send"
+
+setw "$DEPLOYER" 10000000000000000 0 0
+TU --what tusd --to borrower --amount 1 --from-account latifi-deployer
+exit_is "a mint without the gas reserve is refused" 1
+holds "the gas reserve reason is shown" has "less than the 0.02 POL gas reserve"
+reset_top
+
+# ---------------------------------------------------------------- 10. top-up: failed sends and the network
+
+STUB_SEND_STATUS=0x0 TU --what pol --to lender --amount 0.1 --from-account latifi-deployer --execute
+exit_is "a send with receipt status 0x0 exits 5" 5
+holds "the failed receipt is reported" has "was not successful"
+reset_top
+STUB_SEND_STATUS=0x0 TU --what tusd --to lender --amount 5 --from-account latifi-deployer --execute
+exit_is "a failed mint exits 5" 5
+reset_top
+STUB_SEND_FAIL=1 TU --what pol --to lender --amount 0.1 --from-account latifi-deployer --execute
+exit_is "a cast send error exits 5" 5
+holds "the send error text hides the RPC URL" not_has CANARYKEY
+holds "the send error text is scrubbed, not dropped" has "<url>"
+reset_top
+
+STUB_NETWORK=1 TU --what pol --to lender --amount 0.1 --from-account latifi-deployer --execute
+exit_is "chain 1 exits 2" 2
+STUB_NETWORK=137 TU --what pol --to lender --amount 0.1 --from-account latifi-deployer --execute
+exit_is "chain 137 exits 2" 2
+STUB_NETWORK=31337 TU --what pol --to lender --amount 0.1 --from-account latifi-deployer --execute
+exit_is "a local chain exits 2" 2
+holds "no chain mismatch reached a send" not_logged "cast send"
+STUB_RPC_DOWN=1 TU --what pol --to lender --amount 0.1 --from-account latifi-deployer --execute
+exit_is "a down RPC exits 3" 3
+holds "down RPC message hides the key" not_has CANARYKEY
+AMOY_RPC_URL="" TU --what pol --to lender --amount 0.1 --from-account latifi-deployer --execute
+exit_is "a missing RPC URL exits 3" 3
+STUB_CALL_FAIL=1 TU --what tusd --to lender --amount 5 --from-account latifi-deployer
+exit_is "a failing token read exits 3" 3
+holds "a failing token read hides the key" not_has CANARYKEY
+
+# ---------------------------------------------------------------- 11. top-up: usage and secrets
+
+TU --what pol --to borrower --amount 2 --from-account latifi-deployer --dry-run-not-a-flag
+exit_is "an unknown flag exits 2" 2
+TU --what pol --to borrower --amount 1 --from-account latifi-deployer --password hunter2
+exit_is "there is no --password flag" 2
+TU --what pol --to borrower --amount 1 --from-account latifi-deployer --private-key 0xabc
+exit_is "there is no --private-key flag" 2
+TU --what pol --to borrower --amount 1 --from-account latifi-deployer --mnemonic "a b c"
+exit_is "there is no --mnemonic flag" 2
+TU --what pol --to borrower --amount 1
+exit_is "a missing sender exits 2" 2
+TU --what pol --to borrower --amount 1 --from-account a --from-keystore b
+exit_is "two sender sources exit 2" 2
+TU --what pol --to borrower --amount 1 --from-account latifi-deployer --password-file "$WORK/pw.txt"
+exit_is "--password-file without a keystore exits 2" 2
+TU --what pol --to borrower --amount 1 --from-account --execute
+exit_is "an account name that looks like a flag exits 2" 2
+TU --what pol --to borrower --amount 1 --from-account "../etc"
+exit_is "an account name with a slash exits 2" 2
+TU --to borrower --amount 1 --from-account latifi-deployer
+exit_is "a missing --what exits 2" 2
+TU --what eth --to borrower --amount 1 --from-account latifi-deployer
+exit_is "an unknown asset exits 2" 2
+TU --what pol --amount 1 --from-account latifi-deployer
+exit_is "a missing --to exits 2" 2
+TU --what pol --to nobody --amount 1 --from-account latifi-deployer
+exit_is "an unknown recipient exits 2" 2
+TU --what pol --to 0x12 --amount 1 --from-account latifi-deployer
+exit_is "a malformed recipient exits 2" 2
+TU --what pol --to borrower --from-account latifi-deployer
+exit_is "a missing amount exits 2" 2
+TU --what pol --to borrower --amount abc --from-account latifi-deployer
+exit_is "a non numeric amount exits 2" 2
+TU --what pol --to borrower --amount 0 --from-account latifi-deployer
+exit_is "a zero amount exits 2" 2
+TU --what pol --to borrower --amount 0.1234567890123456789 --from-account latifi-deployer
+exit_is "19 POL decimals exit 2" 2
+TU --what tusd --to borrower --amount 0.0000001 --from-account latifi-deployer
+exit_is "7 tUSD decimals exit 2" 2
+TU --what tusd --to borrower --amount -5 --from-account latifi-deployer
+exit_is "a negative amount exits 2" 2
+TU --what tusd --to lender --amount 5 --from-account nobody
+exit_is "an account the keystore does not know exits 2" 2
+holds "usage errors made no send call" not_logged "cast send"
+
+reset_top
+TU --what pol --to lender --amount 0.1 --from-keystore "$WORK/keystores/keystore-file" --password-file "$WORK/pw.txt" --execute
+exit_is "a keystore with a password file works" 0
+holds "cast gets the keystore and the password file path" logged "--keystore $WORK/keystores/keystore-file --password-file $WORK/pw.txt"
+holds "the password text never reaches cast" not_logged "$PWCANARY"
+holds "the password text never reaches the output" not_has "$PWCANARY"
+reset_top
+TU --what pol --to lender --amount 0.1 --from-keystore "$WORK/keystores/keystore-file" --execute
+exit_is "a keystore without a password file lets cast prompt" 0
+holds "no password file flag was invented" not_logged "--password-file"
+reset_top
+
+TU --what tusd --to lender --amount 5 --from-account latifi-deployer --execute
+holds "the output hides the RPC URL" not_has CANARYKEY
+holds "the log never holds the RPC URL" not_logged rpc.example.invalid
+holds "the log never holds a raw key flag" not_logged --private-key
+holds "top-up.sh has no password variable" no_code_match 'read +-s|PASSWORD=|--password([^-]|$)' "$HERE/top-up.sh"
+holds "no script reads a password file" no_code_match 'cat .*(pw|password)|<[[:space:]]*"?[$]password_file' "$HERE/top-up.sh" "$HERE/funding-check.sh"
+
 echo "gate-test: ok $CASES cases"
